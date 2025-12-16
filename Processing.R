@@ -3,13 +3,13 @@ library(tidyverse)
 library(ggplot2)
 library(readxl)
 
-az1 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2013-2019.csv') %>%
-  as_tibble()
-az2 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2020-2024.csv') %>%
-  as_tibble()
-
-str(az1)
-str(az2)
+# az1 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2013-2019.csv') %>%
+#   as_tibble()
+# az2 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2020-2024.csv') %>%
+#   as_tibble()
+# 
+# str(az1)
+# str(az2)
 
 # az1 <- az1 %>%
 #   dplyr::select(
