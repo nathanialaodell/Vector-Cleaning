@@ -2,6 +2,11 @@ library(dplyr)
 library(tidyverse)
 library(ggplot2)
 library(readxl)
+library(sf)
+
+#------------------------------
+# LOADING IN DATA AND SUBSETTING
+#------------------------------
 
 # az1 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2013-2019.csv') %>%
 #   as_tibble()
@@ -10,6 +15,9 @@ library(readxl)
 # 
 # str(az1)
 # str(az2)
+
+# az1_mi <- az1[is.na(az1$Latitude), ] # no spatial indication at all
+# az2_mi <- az2[is.na(az2$Latitude), ] # no cross street data
 
 # az1 <- az1 %>%
 #   dplyr::select(
@@ -117,58 +125,54 @@ ggplot(
   aes(fill = Species, y = Total, x = Month)
 ) + 
   geom_bar(position="fill", stat="identity") + 
-  geom_line(x = Month, y = Total) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ylab("Proportion") +
   facet_wrap(~ Year)
-=======
-az1 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2013-2019.csv') %>%
-  as_tibble()
-az2 <- read_csv('/Users/nathanialodell/Library/CloudStorage/OneDrive-UW/Thesis/Data/AZ/2020-2024.csv') %>%
-  as_tibble()
 
-str(az1)
-str(az2)
+# let's look at this in space across all years
+# ggplot(
+#   data = AZ_long %>%
+#     dplyr::filter(
+#       !(Species %in% c("None", "Bird", "Unknown", "Cs species", 
+#                        "Ps species", "An species", NA, "None",
+#                        "Ps columbiae")),
+#       Sex == "Females"
+#     ) %>%
+#     dplyr::group_by(
+#       Species, Latitude, Longitude, TrapID
+#     ) %>%
+#     dplyr::summarise(
+#       Total = log(sum(Count) + 1)
+#     ) %>%
+#     st_as_sf(
+#       coords = c("Latitude", "Longitude")
+#     )
+# ) # turns out there are some NAs in the lat/long for 3224 observations
 
-az1 <- az1 %>%
-  dplyr::select(
-    `ID Number`,
-    `Lab Date`,
-    Species,
-    Males,
-    Females,
-    Disease,
-    `Test Result`,
-    Latitude,
-    Longitude
-  ) %>%
-  dplyr::rename(
-    TrapID = "ID Number",
-    Lab_Date = "Lab Date",
-    Result = "Test Result"
-  ) %>%
-  dplyr::mutate(
-    Males = as.integer(Males),
-    Females = as.integer(Females),
-    Lab_Date = as.Date(Lab_Date, "%m/%d/%y"),
-    Disease = ifelse(
-      Disease == "None", NA, Disease
-    )
-  )
+#----------------------------------
+# INVESTIGATING MISSING COORDINATES (FINISHED 12/20/2025)
+#----------------------------------
+# 
+# rm(list = c("AZ_long", "coords", "data", "months")) # clean up the environment
+# 
+# # missing_coords <- AZ[is.na(AZ$Latitude), ] # there's one complete NA here: remove it
+# 
+# AZ <- AZ[-is.na(AZ$TrapID),]
+# missing_coords <- AZ[is.na(AZ$Latitude), ] 
+# 
+# # might be useful to filter out traps w/ coordinates that have a similar trapID name structure as the ones with missingness
+# # gonna need to use regex for this
+# # grab the indices with regex matches to trapIDs w/ missing coords
+# indices <- c(grep("CC[1-9]+", AZ$TrapID),
+#              grep("[1-9][1-9]-[0-9]+", AZ$TrapID),
+#              grep("CC-[0-9]+-[0-9]+", AZ$TrapID),
+#              grep("SR[A-Z]+-[1-9]", AZ$TrapID),
+#              grep("SR[A-Z]+-[A-Z]+ [0-9]+", AZ$TrapID),
+#              grep("RT[1-9]+", AZ$TrapID),
+#              grep("HC[1-9]", AZ$TrapID))
+# # this matches the entire AZ dataset... no cigar 
+# 
+# AZ <- AZ[-is.na(AZ$Latitude),]
+# write_rds(AZ, "Maricopa (all yr).RDS")
 
-az2 <- az2 %>%
-  dplyr::select(
-    TrapID,
-    Lab_Date,
-    Species,
-    Males,
-    Females,
-    Disease,
-    Result,
-    Latitude,
-    Longitude
-  ) %>%
-  dplyr::mutate(
-    Males = as.integer(Males),
-    Females = as.integer(Females),
-    Lab_Date = as.Date(Lab_Date, "%m/%d/%y")
-  )
+AZ <- readRDS("Maricopa (all yr).RDS")
