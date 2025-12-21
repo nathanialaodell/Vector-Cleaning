@@ -3,6 +3,7 @@ library(tidyverse)
 library(ggplot2)
 library(readxl)
 library(sf)
+library(here)
 
 #------------------------------
 # LOADING IN DATA AND SUBSETTING
@@ -147,7 +148,23 @@ ggplot(
 #     st_as_sf(
 #       coords = c("Latitude", "Longitude")
 #     )
-# ) # turns out there are some NAs in the lat/long for 3224 observations
+# ) # turns out there are some NAs in the lat/long for 1612 observations
+
+# also, there are about 23 observations with 0 females and 0 males, but with a recorded species
+# AZ %>% filter(Females != 0 & Males != 0 & !(Species %in% c("None", "Bird", "Unknown", "Cs species", 
+#                                                               "Ps species", "An species", NA, "None")))
+# AZ <- AZ %>%
+#   filter(
+#     !(
+#       Females == 0 &
+#         Males == 0 &
+#         !(Species %in% c(
+#           "None", "Bird", "Unknown",
+#           "Cs species", "Ps species", "An species",
+#           NA
+#         ))
+#     )
+#   )
 
 #----------------------------------
 # INVESTIGATING MISSING COORDINATES (FINISHED 12/20/2025)
@@ -172,7 +189,119 @@ ggplot(
 #              grep("HC[1-9]", AZ$TrapID))
 # # this matches the entire AZ dataset... no cigar 
 # 
-# AZ <- AZ[-is.na(AZ$Latitude),]
-# write_rds(AZ, "Maricopa (all yr).RDS")
+# AZ <- AZ[!is.na(AZ$Latitude),]
+# write_rds(AZ %>%
+# dplyr::mutate(
+#   Males_ln = log(Males + 1),
+#   Females_ln = log(Females + 1)
+# ), "Maricopa (all yr).RDS")
 
-AZ <- readRDS("Maricopa (all yr).RDS")
+#-----------------------
+# turning into shapefile 
+#-----------------------
+
+CRS = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
+
+AZ_sf <- AZ %>%
+  st_as_sf(
+    coords = c("Longitude", "Latitude"),
+    crs = CRS
+  )
+
+AZ_long <- AZ_sf %>% # easier to plot with longer format
+  pivot_longer(cols = c(Males, Females), names_to = "Sex", values_to = "Count")
+
+write_sf(AZ_sf, "Maricopa (wide).shp")
+write_sf(AZ_long, "Maricopa (long).shp")
+
+#--------------------------------------------------------
+# some time series for visual trends (purely descriptive!)
+#--------------------------------------------------------
+AZ_sf <- read_sf("Maricopa (wide).shp")
+AZ_long <- read_sf("Maricopa (long).shp")
+
+# keep this handy! https://posit.co/wp-content/uploads/2022/10/data-visualization-1.pdf
+
+p1 <- ggplot(
+  data = AZ_long %>%
+    dplyr::filter(
+      !(Species %in% c("None", "Bird", "Unknown", "Cs species", 
+                       "Ps species", "An species", NA, "None"))
+    ) %>%
+    dplyr::group_by(
+      Year, Month, Species, Sex
+    ) %>%
+    dplyr::summarise(
+      Total = sum(Count)
+    ),
+  aes(fill = Species, y = Total, x = Month)
+) + 
+  geom_bar(position="fill", stat="identity") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ylab("Proportion") +
+  facet_wrap(~ Year)
+
+ggsave(here("Figs", "species_props_AZ.png"), plot = p1)
+
+p2 <- ggplot(
+  data = AZ_long %>%
+    dplyr::filter(
+      !(Species %in% c("None", "Bird", "Unknown", "Cs species", 
+                       "Ps species", "An species", NA, "None",
+                       "Ps columbiae")),
+      Sex == "Females"
+    ) %>%
+    dplyr::group_by(
+      Year, Species, Month
+    ) %>%
+    dplyr::summarise(
+      Total = sum(log(Count + 1))
+    ),
+  aes(x = Month, y = Total, color = Species, group = Species)
+) +
+  geom_line() +
+  facet_wrap(~ Year)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ylab("ln(Abundance + 1)")
+
+ggsave(here("Figs", "year_trends_AZ.png"), plot = p2)
+
+temp <- AZ_long %>%
+  dplyr::group_by(
+    geometry, Year # not grouping by trapID for effort because trap names could change without their locations changing
+  ) %>%
+  dplyr::summarise(
+    effort = n()/length(unique(Year))
+  )
+
+p3 <- ggplot(
+  data = temp
+) +
+  geom_histogram(aes(effort), binwidth = 
+                   2 * IQR(temp$effort) / length(temp$effort)^(1/3)) + # using Freedman-Diaconis rule
+  facet_wrap(~Year)
+
+ggsave(here("Figs", "effort_AZ.png"), plot = p3)
+
+p4 <- ggplot(
+  data = AZ_sf%>%
+    dplyr::filter(
+      !(Species %in% c("None", "Bird", "Unknown", "Cs species", 
+                       "Ps species", "An species", NA, "None",
+                       "Ps columbiae")),
+      Females_ln != 0 # this is different than what we filtered out above--some observations have males but no females
+    ) %>%
+    dplyr::group_by(
+      Year, Species, geometry
+    ) %>%
+    dplyr::summarise(
+      Mean = sum(Females_ln)
+    ) %>%
+    st_jitter(factor = 0.05)
+) +
+  geom_sf(aes(size = Mean, color = Species), shape = 1, alpha = 0.5) +
+  labs(size = "mean(log(abundance + 1))") +
+  scale_color_manual(values = c("#EB2D05", "#6A650B", "#0CED25","#0C31ED", "#BC0CED", "#FFAD00")) +
+  facet_wrap(~Year)
+
+ggsave(here("Figs", "spatial_sums_AZ.png"), plot = p4)
