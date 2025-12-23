@@ -57,3 +57,17 @@ There are 23 of these observations (find them with the following command: AZ_sf 
                                                               "Ps species", "An species", NA, "None")))). I've removed them (0.003% of observations)
                                                               
 I think for now I can move on to the Cali dataset.
+
+### December 22, 2025
+
+I will only be able to automate so much in terms of having a single function to clean datasets, but we can at least build something to do the 'janitor' level operations (CA and TX script)
+
+# TX
+
+This will be the biggest pain so I am pivoting to just do this instead. 
+
+Column formats are not consistent across sheets, so we have to do that manually in the actual xlsx file.
+
+What a [powerful tool](https://docs.ropensci.org/parzer/) I have found! This one package is able to parse through the insanely messy DFW dataset with no issues. Incredible stuff. This should let us be **much** less wasteful! Stoked about this. 
+
+Taking a break for today since building out that function took some time amongst other distractions, haha.
