@@ -71,3 +71,20 @@ Column formats are not consistent across sheets, so we have to do that manually 
 What a [powerful tool](https://docs.ropensci.org/parzer/) I have found! This one package is able to parse through the insanely messy DFW dataset with no issues. Incredible stuff. This should let us be **much** less wasteful! Stoked about this. 
 
 Taking a break for today since building out that function took some time amongst other distractions, haha.
+
+### December 23, 2025
+
+# DATA DICTIONARY FOR EXCEL SHEET SWEEP
+| Variable  | Description      |
+|-----------|------------------|
+| county    | County of collection |
+| sampled_date    | mm/dd/yyyy trap was collected |
+| address OR trapID  | Street OR identifier of trap placement |
+| collection_method   | Trap type of collection |
+| latitude    | Coordinate |
+| longitude    | Coordinate |
+| mosquito_id    | Species collected on sampled_date |
+| number_of_mosquitoes    | Number of a particular species collected on sampled_date |
+| state    | State of collection (can be in the format "TX" or "Texas" |
+
+Still working on function... looks like excel portion may be done!
