@@ -231,6 +231,8 @@ sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){
   }
   
   data.temp <- list_rbind(data.temp)
+  data.temp <- data.temp[!duplicated(data.temp), ] # left join can create some duplicates
+  
  return(data.temp) 
 }
 
@@ -252,7 +254,7 @@ nueces_filtered <- nueces %>% dplyr::filter(latitude >= 27.558358,
                                              longitude >= -97.942146, 
                                              longitude <= -96.984281 ) # bb for Nueces
 
-nrow(nueces) - nrow(nueces_filtered) # not bad (2831)
+nrow(nueces) - nrow(nueces_filtered) # not bad (506)
 
 CRS = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
 test <- nueces_filtered %>% 
