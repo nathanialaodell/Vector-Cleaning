@@ -9,6 +9,7 @@ library(janitor)
 library(parzer) # incredibly powerful tool for parsing messy lat/long coordinates
 library(tidygeocoder)
 library(postmastr) # for cleaning addresses
+library(tigris)
 
 # use this for readxl! https://github.com/rstudio/cheatsheets/blob/main/data-import.pdf
 
@@ -31,10 +32,9 @@ nu.path = here("TX/Dallas County/Nueces County 2008-2025.xlsx")
 ca.path = here("CA")
 ca.extensions <- c(
   paste(ca.path, "/abundance_", "2003-10.csv", sep = ""),
-  paste(ca.path, "/abundance_", "2011-15.csv", sep = "")
-  # ,
-  # paste(ca.path, "/abundance_", "2016-20.csv", sep = ""),
-  # paste(ca.path, "/abundance_", "2021-25.csv", sep = "")
+  paste(ca.path, "/abundance_", "2011-15.csv", sep = ""),
+  paste(ca.path, "/abundance_", "2016-20.csv", sep = ""),
+  paste(ca.path, "/abundance_", "2021-25.csv", sep = "")
 )
 
 #----------------------------------------------------------
@@ -43,7 +43,7 @@ ca.extensions <- c(
 
 # PREAMBLE TO THE FUNCTION!
 # this function assumes that you have a dataset that has at least the following 
-# (CASE SENSITIVE!) column names when working w/ excel sheets: 
+# column names when working w/ excel sheets: 
 # county, sampled_date, address, collection_method,
 # latitude, longitude, mosquito_id, number_of_mosquitoes, state
 
@@ -57,7 +57,16 @@ min <- list()
 parsed <- list()
 temp.list <- list()
 
-sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){ 
+sweep_fun <- function(path, # if data is in one file, where is it?
+                      state_name, # what state surveillance data is it? abbreviated
+                      extensions, # is data spread throughout multiple files?
+                      sheets, # if extensions = NULL -> does it have sheets?
+                      dirs = dirs # see above function call
+                      ){ 
+  
+  #----------------
+  # LOADING IN DATA
+  #----------------
   
   if(sheets == TRUE){
     
@@ -82,9 +91,23 @@ sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){
     
     for(i in 1:length(temp.list)){
       
+      #----------------------------------------
+      # standardize genus (two letter no period)
+      #----------------------------------------
+      
+      temp.list[[i]]$mosquito_id <- gsub("^Aedes ", "Ae ", temp.list[[i]]$mosquito_id)
+      temp.list[[i]]$mosquito_id <- gsub("^Ae. ", "Ae ", temp.list[[i]]$mosquito_id)
+      temp.list[[i]]$mosquito_id <- gsub("^Culex ", "Cx ", temp.list[[i]]$mosquito_id)
+      temp.list[[i]]$mosquito_id <- gsub("^Cx. ", "Cx ", temp.list[[i]]$mosquito_id)
+      
+      #-----------------------------------------
       # INSERT STATE IDENTIFIER
+      # this is necessary for cleaning addresses
+      #-----------------------------------------
+      
       temp.list[[i]]$state <- state_name
       
+      #------------------------------------------------------------------------------
       # CLEANING LAT
       # the purpose of doing this is for list_rbind() (if there are eastings in 
       # coordinates they will be character and not double. Can create a big mess)
@@ -94,31 +117,42 @@ sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){
       # when coordinates are in DMS; bad practice as opposed to using decimals 
       # in effect we are doing all this work because if these issues are present
       # we are going to have to just geocode trap sites
+      #------------------------------------------------------------------------------
+      
       
       temp.list[[i]]$latitude <- gsub("^[A-Z] ", "", temp.list[[i]]$latitude)
       temp.list[[i]]$latitude <- gsub("^[A-Z]", "", temp.list[[i]]$latitude)
       temp.list[[i]]$latitude <- gsub(" [A-Z]$", "", temp.list[[i]]$latitude)
       temp.list[[i]]$latitude <- gsub("[A-Z]$", "", temp.list[[i]]$latitude)
       
-      
+      #-------------------------
       # CLEANING LONG
+      # same philosophy as above
+      #-------------------------
+      
       temp.list[[i]]$longitude <- gsub("^[A-Z] ", "", temp.list[[i]]$longitude)
       temp.list[[i]]$longitude <- gsub("^[A-Z]", "", temp.list[[i]]$longitude)
       temp.list[[i]]$longitude <- gsub(" [A-Z]$", "", temp.list[[i]]$longitude)
       temp.list[[i]]$longitude <- gsub("[A-Z]$", "", temp.list[[i]]$longitude)
       
       # from here, use parzer!
+      
       temp.list[[i]]$latitude <- parse_lat(temp.list[[i]]$latitude)
       temp.list[[i]]$longitude <- parse_lon(temp.list[[i]]$longitude)
       
       # make sure long is negative and vice versa for lat (sometimes it isn't)
+      
       temp.list[[i]] <- temp.list[[i]] %>%
         dplyr::mutate(
           longitude = ifelse(
-            longitude > 0, longitude * -1, longitude
+            longitude > 0, longitude * -1, longitude # make sure long is negative
           ),
-          latitude = abs(latitude)
+          latitude = abs(latitude) # make sure lat is positive
         )
+      
+      #------------------------------------------------------------
+      # CLEANING ADDRESSES TO MAKE GEOCODING MORE LIKELY TO SUCCEED
+      #------------------------------------------------------------
       
       if(sum(is.na(temp.list[[i]]$latitude)) != 0){ # don't waste time otherwise!
         
@@ -197,7 +231,7 @@ sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){
         select(-address_clean, -geo_lat, -geo_lon)
       
       # propagate known coordinates across identical addresses
-      # essentially, the problem is that there are rare occurences where
+      # essentially, the problem is that there are rare occurrences where
       # an address has a full lat/long in one observation, but a partial in another
       # coalesce makes sure we don't get -Inf for addresses where there are NO 
       # coordinates at all
@@ -213,11 +247,9 @@ sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){
                                      max(longitude, na.rm = TRUE), NA_real_))
         ) %>%
         ungroup()
-      
-      
-      
-      
+    
       }
+      
 
       # finally, if there is a sex column, filter out males and remove the column entirely
       if ("sex" %in% names(temp.list[[i]])){
@@ -254,41 +286,64 @@ sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){
   data.temp <- list_rbind(data.temp)
   data.temp <- data.temp[!duplicated(data.temp), ] # left join can create some duplicates
   
+  # lastly for the coordinates, we need to ensure that there aren't any 
+  # coords that far exceed the bounding box of a given county; we'll
+  # use a combo of tigris and sf for this
+  # it is most efficient to do this after collapsing the list and removing dupes
+  
+  county_shapes <- counties(state = state_name, cb = TRUE)
+  valid_counties <- county_shapes$NAME
+  
+  # loop through each county present in the data
+  for (county_name in unique(data.temp$county)) {
+    
+    # get bounding box for this county
+    bbox <- st_bbox(
+      dplyr::filter(county_shapes, NAME == county_name)
+    )
+    
+    # identify rows for this county only
+    idx <- data.temp$county == county_name
+    
+    # identify points outside the bbox
+    outside_bbox <- idx & (
+      data.temp$longitude < bbox$xmin |
+        data.temp$longitude > bbox$xmax |
+        data.temp$latitude  < bbox$ymin |
+        data.temp$latitude  > bbox$ymax
+    )
+    
+    # drop only the offending rows
+    data.temp <- data.temp[!outside_bbox, ]
+  }
+  
+  # final safety valve
+  data.temp <- data.temp %>% filter(county %in% valid_counties)
+  
+  
  return(data.temp) 
+
 }
+
+# TEST SHEETS
 
 nueces <- sweep_fun(path = nu.path, state_name = "TX", 
                      extensions = NULL, sheets = TRUE)
 
-dallas <- sweep_fun(path = dal.path, state_name = "TX", 
-                      extensions = NULL, sheets = TRUE)
+# TEST CSV
 
 california <- sweep_fun(path = NULL, state_name = "CA", 
                     extensions = ca.extensions, sheets = FALSE)
 
-#----------------------------------------------------------
-# MOP step--cleans up the basic that cannot be automated
-#----------------------------------------------------------
-# the bounding box will be very telling, and for Nueces it's very obvious
-# I think anything less than 27 and over 29 are clear, incorrect coordinates we need
-# to just remove
-
-nueces_filtered <- nueces %>% dplyr::filter(latitude >= 27.558358, 
-                                            latitude <= 27.995659, 
-                                             longitude >= -97.942146, 
-                                             longitude <= -96.984281 ) # bb for Nueces
-
-nrow(nueces) - nrow(nueces_filtered) # not bad (506)
-
+# TEST SF
 CRS = "+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"
-test <- nueces_filtered %>% 
+california %>% 
   st_as_sf(coords = c("longitude", "latitude"), 
            crs = CRS,
-           na.fail = F)
+           na.fail = F) %>%
+  ggplot() +
+  geom_sf()
 
-st_bbox(test)
-
-ggplot() +
-  geom_sf(data = test)
-
-write_rds(nueces_filtered, "Nueces (pre-processed).RDS")
+#---------------------------------------------------------------------
+# MOP step--cleans up the basic that cannot or should not be automated
+#---------------------------------------------------------------------
