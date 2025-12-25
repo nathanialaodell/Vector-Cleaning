@@ -74,12 +74,13 @@ Taking a break for today since building out that function took some time amongst
 
 ### December 23, 2025
 
-# DATA DICTIONARY FOR EXCEL SHEET SWEEP
+# DATA DICTIONARY FOR INPUT DATASET (FOR SWEEP FUNCTION ONLY)
+
 | Variable  | Description      |
 |-----------|------------------|
 | county    | County of collection |
 | sampled_date    | mm/dd/yyyy trap was collected |
-| address OR trapID  | Street OR identifier of trap placement |
+| address  | Street OR identifier of trap placement (e.g. "Hc11", "14", etc.)|
 | collection_method   | Trap type of collection |
 | latitude    | Coordinate |
 | longitude    | Coordinate |
@@ -88,3 +89,7 @@ Taking a break for today since building out that function took some time amongst
 | state    | State of collection (can be in the format "TX" or "Texas" |
 
 Still working on function... looks like excel portion may be done!
+
+### December 24, 2025
+
+Barring finding any bugs, csv is done as well!

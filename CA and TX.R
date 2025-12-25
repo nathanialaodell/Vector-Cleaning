@@ -31,9 +31,10 @@ nu.path = here("TX/Dallas County/Nueces County 2008-2025.xlsx")
 ca.path = here("CA")
 ca.extensions <- c(
   paste(ca.path, "/abundance_", "2003-10.csv", sep = ""),
-  paste(ca.path, "/abundance_", "2011-15.csv", sep = ""),
-  paste(ca.path, "/abundance_", "2016-20.csv", sep = ""),
-  paste(ca.path, "/abundance_", "2021-25.csv", sep = "")
+  paste(ca.path, "/abundance_", "2011-15.csv", sep = "")
+  # ,
+  # paste(ca.path, "/abundance_", "2016-20.csv", sep = ""),
+  # paste(ca.path, "/abundance_", "2021-25.csv", sep = "")
 )
 
 #----------------------------------------------------------
@@ -46,22 +47,38 @@ ca.extensions <- c(
 # county, sampled_date, address, collection_method,
 # latitude, longitude, mosquito_id, number_of_mosquitoes, state
 
-geo.list <- list()
-temp.na <- list()
-min <- list()
-parsed <- list()
 
 # street direction dictionary for cleaning
 dirs <- pm_dictionary(type = "directional", filter = c("N", "S", "E", "W"), locale = "us")
 
-sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){ 
+geo.list <- list()
+temp.na <- list()
+min <- list()
+parsed <- list()
+temp.list <- list()
+
+sweep_fun <- function(path, state_name, extensions, sheets, dirs = dirs){ 
   
-  if(excel == TRUE){
+  if(sheets == TRUE){
+    
     temp.list <- path %>%
       excel_sheets() %>%
       set_names() %>%
       map(read_excel, path = path) %>%
       lapply(., clean_names)
+    
+  }
+  
+  else{
+    
+    for(i in 1:length(extensions)){
+      temp.list[[i]] <- read.csv(extensions[i]) 
+    }
+    
+    temp.list <- temp.list %>%
+      lapply(., clean_names)
+  
+    }
     
     for(i in 1:length(temp.list)){
       
@@ -103,7 +120,8 @@ sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){
           latitude = abs(latitude)
         )
       
-      
+      if(sum(is.na(temp.list[[i]]$latitude)) != 0){ # don't waste time otherwise!
+        
       # geocoding where coords are NA
       # subset to only coords with NA values
       temp.na[[i]] <- temp.list[[i]] %>%
@@ -111,8 +129,6 @@ sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){
         dplyr::select(
           address, city, state, county
         )
-      
-      if(any(!is.na(temp.na[[i]]$address))){ # don't waste time otherwise!
       
       # prepping addresses prior to geocoding
       temp.na[[i]] <- pm_identify(temp.na[[i]], var = address, locale = "us")
@@ -199,34 +215,39 @@ sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){
         ungroup()
       
       
+      
+      
       }
 
+      # finally, if there is a sex column, filter out males and remove the column entirely
+      if ("sex" %in% names(temp.list[[i]])){
+        temp.list[[i]]$sex <- gsub("^Females.*", "Female", temp.list[[i]]$sex)
+        temp.list[[i]]$sex <- gsub("^Female.*", "Female", temp.list[[i]]$sex)
+        temp.list[[i]]$sex <- gsub("^F.*", "Female", temp.list[[i]]$sex)
+        temp.list[[i]]$sex <- gsub("^f.*", "Female", temp.list[[i]]$sex)
+        
+        temp.list[[i]] <- temp.list[[i]] %>%
+          dplyr::filter(
+            sex == "Female"
+          ) %>%
+          dplyr::select(-sex)
+      }
+      
     }
     
     data.temp <- temp.list
-  }
-  
-  else{
-    data.list <- list()
-    for(i in 1:length(extensions)){
-      data.list[[i]] <- read.csv(ca.extensions[i])
-    }
-    
-    data.temp <- lapply(data.list, clean_names) %>%
-      list_bind() %>%
-      dplyr::mutate(
-        state = state_name
-      )
-  }
   
   for(i in 1:length(data.temp)){
     data.temp[[i]] <- data.temp[[i]] %>%
       dplyr::select(
-        county, city, sampled_date, address, collection_method,
+        county, sampled_date, address, collection_method,
         latitude, longitude, mosquito_id, number_of_mosquitoes, state
       ) %>%
       dplyr::mutate(
         sampled_date = as.Date(sampled_date, format = "%m/%d/%y")
+      ) %>%
+      dplyr::rename(
+        trapID = "address"
       )
   }
   
@@ -237,10 +258,13 @@ sweep_fun <- function(path, state_name, extensions, excel, dirs = dirs){
 }
 
 nueces <- sweep_fun(path = nu.path, state_name = "TX", 
-                     extensions = NULL, excel = TRUE)
+                     extensions = NULL, sheets = TRUE)
 
 dallas <- sweep_fun(path = dal.path, state_name = "TX", 
-                      extensions = NULL, excel = TRUE)
+                      extensions = NULL, sheets = TRUE)
+
+california <- sweep_fun(path = NULL, state_name = "CA", 
+                    extensions = ca.extensions, sheets = FALSE)
 
 #----------------------------------------------------------
 # MOP step--cleans up the basic that cannot be automated
