@@ -23,7 +23,8 @@ library(tigris)
 
 
 # street direction dictionary for cleaning
-dirs <- pm_dictionary(type = "directional", filter = c("N", "S", "E", "W"), locale = "us")
+dirs_dict <- pm_dictionary(type = "directional", filter = c("N", "S", "E", "W"), 
+                           locale = "us")
 
 geo.list <- list()
 temp.na <- list()
@@ -31,289 +32,277 @@ min <- list()
 parsed <- list()
 temp.list <- list()
 
-sweep_fun <- function(path, # if data is in one file, where is it?
-                      state_name, # what state surveillance data is it? abbreviated
-                      extensions = NULL, # is data spread throughout multiple files?
-                      sheets = FALSE, # if extensions = NULL -> does it have sheets?
-                      dirs = dirs # see above function call
-){
-  
-  #----------------
-  # LOADING IN DATA
-  #----------------
+#-------------
+# LOAD IN DATA
+#-------------
+
+loader_fun <- function(path, extensions = NULL, sheets = FALSE){
   
   if(sheets == TRUE){
     
     temp.list <- path %>%
       excel_sheets() %>%
       set_names() %>%
-      map(read_excel, path = path) %>%
-      lapply(., clean_names)
+      map(read_excel, path = path)
     
   }
   
   else if(!is.null(extensions)){
     
-    for(i in 1:length(extensions)){
-      temp.list[[i]] <- read.csv(extensions[i])
-    }
-    
-    temp.list <- temp.list %>%
-      lapply(., clean_names)
+    temp.list <- map(extensions, read.csv) # nicer syntax than base [[i]]
     
   }
   
   else{
-    
-    for(i in 1:length(path)){
-      temp.list[[i]] <- read.csv(path[i])
-    }
-    temp.list <- temp.list %>%
-      lapply(., clean_names)
-    
+    temp.list <- map(path, read.csv)
   }
   
-  for(i in 1:length(temp.list)){
-    
-    #----------------------------------------
-    # standardize genus (two letter no period)
-    #----------------------------------------
-    
-    temp.list[[i]]$mosquito_id <- gsub("^Aedes ", "Ae ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^Ae. ", "Ae ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^Culex ", "Cx ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^Cx. ", "Cx ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^Anopheles ", "An ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^An. ", "An ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^Psorophora ", "P ", temp.list[[i]]$mosquito_id)
-    temp.list[[i]]$mosquito_id <- gsub("^P. ", "P ", temp.list[[i]]$mosquito_id)
-    
-    # for now (December 27th), no pseudo-absence records; can append if needed
-    
-    #-----------------------------------------
-    # INSERT STATE IDENTIFIER
-    # this is necessary for cleaning addresses
-    #-----------------------------------------
-    
-    temp.list[[i]]$state <- state_name
-    
-    #------------------------------------------------------------------------------
-    # CLEANING LAT
-    # the purpose of doing this is for list_rbind() (if there are eastings in
-    # coordinates they will be character and not double. Can create a big mess)
-    # have to use regex to remove the northing/eastings in lat and long respectively
-    
-    # finally, there should be no spacing between numbers (this can be present
-    # when coordinates are in DMS; bad practice as opposed to using decimals
-    # in effect we are doing all this work because if these issues are present
-    # we are going to have to just geocode trap sites
-    #------------------------------------------------------------------------------
-    
-    
-    temp.list[[i]]$latitude <- gsub("^[A-Z] ", "", temp.list[[i]]$latitude)
-    temp.list[[i]]$latitude <- gsub("^[A-Z]", "", temp.list[[i]]$latitude)
-    temp.list[[i]]$latitude <- gsub(" [A-Z]$", "", temp.list[[i]]$latitude)
-    temp.list[[i]]$latitude <- gsub("[A-Z]$", "", temp.list[[i]]$latitude)
-    
-    #-------------------------
-    # CLEANING LONG
-    # same philosophy as above
-    #-------------------------
-    
-    temp.list[[i]]$longitude <- gsub("^[A-Z] ", "", temp.list[[i]]$longitude)
-    temp.list[[i]]$longitude <- gsub("^[A-Z]", "", temp.list[[i]]$longitude)
-    temp.list[[i]]$longitude <- gsub(" [A-Z]$", "", temp.list[[i]]$longitude)
-    temp.list[[i]]$longitude <- gsub("[A-Z]$", "", temp.list[[i]]$longitude)
-    
-    # from here, use parzer!
-    
-    temp.list[[i]]$latitude <- parse_lat(temp.list[[i]]$latitude)
-    temp.list[[i]]$longitude <- parse_lon(temp.list[[i]]$longitude)
-    
-    # make sure long is negative and vice versa for lat (sometimes it isn't)
-    
-    temp.list[[i]] <- temp.list[[i]] %>%
-      dplyr::mutate(
-        longitude = ifelse(
-          longitude > 0, longitude * -1, longitude # make sure long is negative
-        ),
-        latitude = abs(latitude) # make sure lat is positive
-      )
-    
-    #------------------------------------------------------------
-    # CLEANING ADDRESSES TO MAKE GEOCODING MORE LIKELY TO SUCCEED
-    #------------------------------------------------------------
-    
-    if(sum(is.na(temp.list[[i]]$latitude)) != 0 &
-       "city" %in% names(temp.list[[i]])){ # don't waste time otherwise!
-      
-      # geocoding where coords are NA
-      # subset to only coords with NA values
-      temp.na[[i]] <- temp.list[[i]] %>%
-        dplyr::filter(is.na(latitude) | is.na(longitude)) %>%
-        dplyr::select(
-          address, city, state, county
-        )
-      
-      # prepping addresses prior to geocoding
-      temp.na[[i]] <- pm_identify(temp.na[[i]], var = address, locale = "us")
-      
-      min[[i]] <- pm_prep(temp.na[[i]], var = address, type = "street")
-      
-      min[[i]] <- pm_postal_parse(min[[i]])
-      
-      min[[i]] <- pm_house_parse(min[[i]])
-      
-      min[[i]] <- pm_streetDir_parse(min[[i]], dictionary = dirs)
-      
-      # error checking
-      str(temp.na[[i]]$address)
-      table(temp.na[[i]]$address, useNA = "ifany")
-      
-      str(min[[i]]$pm.address)
-      table(min[[i]]$pm.address, useNA = "ifany")
-      
-      
-      min[[i]] <- pm_streetSuf_parse(min[[i]])
-      
-      min[[i]] <- pm_street_parse(min[[i]], ordinal = TRUE, drop = TRUE)
-      
-      parsed[[i]] <- pm_replace(min[[i]], source = temp.na[[i]])
-      
-      parsed[[i]]$pm.city <- parsed[[i]]$city
-      
-      parsed[[i]]$pm.state <- state_name
-      
-      parsed[[i]] <- pm_rebuild(parsed[[i]], output = "full", side = "right",
-                                keep_parsed = "limited")
-      
-      
-      geo.list[[i]] <- geocode(
-        .tbl = parsed[[i]],
-        street = pm.address,
-        city = city,
-        state = pm.state,
-        return_input = TRUE,
-        timeout = 20,
-        method = 'census'
-      ) %>%
-        dplyr::select(
-          address, lat, long
-        ) %>%
-        dplyr::rename(
-          latitude = "lat",
-          longitude = "long"
-        )
-      
-      temp.list[[i]] <- temp.list[[i]] %>% # normalize address formatting
+  temp.list %>%
+    lapply(clean_names)
+}
+
+#----------------------------------------
+# STANDARDIZE GENUS (two letter no period)
+#----------------------------------------
+
+standard_genus <- function(df){
+  df$mosquito_id <- gsub("^Aedes ", "Ae ", df$mosquito_id)
+  df$mosquito_id <- gsub("^Ae. ", "Ae ", df$mosquito_id)
+  df$mosquito_id <- gsub("^Culex ", "Cx ", df$mosquito_id)
+  df$mosquito_id <- gsub("^Cx. ", "Cx ", df$mosquito_id)
+  df$mosquito_id <- gsub("^Anopheles ", "An ", df$mosquito_id)
+  df$mosquito_id <- gsub("^An. ", "An ", df$mosquito_id)
+  df$mosquito_id <- gsub("^Psorophora ", "P ", df$mosquito_id)
+  df$mosquito_id <- gsub("^P. ", "P ", df$mosquito_id)
+  
+  df
+}
+
+#---------------------------------
+# PARSE COORDS TO STANDARDIZE THEM
+#---------------------------------
+
+parse_coords <- function(df){
+  
+  clean_dir <- function(z){
+    z %>%
+      gsub("^[A-Z] ?", "", .) %>%
+      gsub(" ?[A-Z]$", "", .)
+  }
+  
+  df$latitude  <- clean_dir(df$latitude)
+  df$longitude <- clean_dir(df$longitude)
+  
+  df$latitude  <- parse_lat(df$latitude)
+  df$longitude <- parse_lon(df$longitude)
+  
+  df %>%
+    dplyr::mutate(
+      longitude = ifelse(longitude > 0, longitude * -1, longitude),
+      latitude  = abs(latitude)
+    )
+  
+}
+
+#--------------------------
+# GEOCODE COORDINATES W/ NA 
+#--------------------------
+
+geocode_missing_coords <- function(df, state_name, dirs) {
+  
+  df$state <- state_name
+  
+  if (!("city" %in% names(df)) ||
+      sum(is.na(df$latitude) | is.na(df$longitude)) == 0) {
+    return(df)
+  }
+  
+  na_df <- df %>%
+    dplyr::filter(is.na(latitude) | is.na(longitude)) %>%
+    dplyr::select(address, city, state, county)
+  
+  na_df <- pm_identify(na_df, var = address, locale = "us")
+  
+  min <- pm_prep(na_df, var = address, type = "street")
+  
+  min <- pm_postal_parse(min)
+  
+  min <- pm_house_parse(min)
+  
+  min <- pm_streetDir_parse(min, dictionary = dirs)
+  
+  # error checking
+  str(na_df$address)
+  table(na_df$address, useNA = "ifany")
+  
+  str(min$pm.address)
+  table(min$pm.address, useNA = "ifany")
+  
+  
+  min <- pm_streetSuf_parse(min)
+  
+  min <- pm_street_parse(min, ordinal = TRUE, drop = TRUE)
+  
+  parsed <- pm_replace(min, source = na_df)
+  
+  parsed$pm.city <- parsed$city
+  
+  parsed$pm.state <- state_name
+  
+  parsed <- pm_rebuild(parsed, output = "full", side = "right",
+                       keep_parsed = "limited")
+  
+  geo.df <- geocode(
+    .tbl = parsed,
+    street = pm.address,
+    city = city,
+    state = pm.state,
+    return_input = TRUE,
+    timeout = 20,
+    method = 'census'
+  ) %>%
+    dplyr::select(
+      address, lat, long
+    ) %>%
+    dplyr::rename(
+      latitude = "lat",
+      longitude = "long"
+    )
+  
+  df <- df %>%
+    dplyr::mutate(address_clean = str_to_upper(str_trim(address))) %>%
+    left_join(
+      geo.df %>%
         dplyr::mutate(address_clean = str_to_upper(str_trim(address))) %>%
-        left_join(
-          geo.list[[i]] %>%
-            dplyr::mutate(address_clean = str_to_upper(str_trim(address))) %>%
-            dplyr::select(address_clean, geo_lat = latitude, geo_lon = longitude),
-          by = "address_clean" ,
-          relationship = 'many-to-many') %>%
-        dplyr::mutate(latitude = ifelse(is.na(latitude),
-                                        geo_lat,
-                                        latitude),
-                      longitude = ifelse(is.na(longitude),
-                                         geo_lon,
-                                         longitude) ) %>%
-        select(-address_clean, -geo_lat, -geo_lon)
-      
-      # propagate known coordinates across identical addresses
-      # essentially, the problem is that there are rare occurrences where
-      # an address has a full lat/long in one observation, but a partial in another
-      # coalesce makes sure we don't get -Inf for addresses where there are NO
-      # coordinates at all
-      
-      temp.list[[i]] <- temp.list[[i]] %>%
-        group_by(address) %>%
-        mutate(
-          latitude = coalesce(latitude,
-                               ifelse(is.finite(max(latitude, na.rm = TRUE)),
-                                      max(latitude, na.rm = TRUE), NA_real_)),
-          longitude = coalesce(longitude,
-                               ifelse(is.finite(max(longitude, na.rm = TRUE)),
-                                      max(longitude, na.rm = TRUE), NA_real_))
-        ) %>%
-        ungroup()
-      
-    }
-    
-    
-    # finally, if there is a sex column, filter out males and remove the column entirely
-    if ("sex" %in% names(temp.list[[i]])){
-      temp.list[[i]]$sex <- gsub("^Females.*", "Female", temp.list[[i]]$sex)
-      temp.list[[i]]$sex <- gsub("^Female.*", "Female", temp.list[[i]]$sex)
-      temp.list[[i]]$sex <- gsub("^F.*", "Female", temp.list[[i]]$sex)
-      temp.list[[i]]$sex <- gsub("^f.*", "Female", temp.list[[i]]$sex)
-      
-      temp.list[[i]] <- temp.list[[i]] %>%
-        dplyr::filter(
-          sex == "Female"
-        ) %>%
-        dplyr::select(-sex)
-    }
-    
-  }
+        dplyr::select(address_clean, geo_lat = latitude, geo_lon = longitude),
+      by = "address_clean" ,
+      relationship = 'many-to-many') %>%
+    dplyr::mutate(latitude = ifelse(is.na(latitude),
+                                    geo_lat,
+                                    latitude),
+                  longitude = ifelse(is.na(longitude),
+                                     geo_lon,
+                                     longitude) ) %>%
+    select(-address_clean, -geo_lat, -geo_lon)
   
-  data.temp <- temp.list
+  df[!duplicated(df),]
+}
+
+#------------------------------------------
+# FILTER OUT FEMALES (CAN SKIP) 
+#------------------------------------------
+
+filter_females <- function(df) {
   
-  for(i in 1:length(data.temp)){
-    data.temp[[i]] <- data.temp[[i]] %>%
-      dplyr::select(
-        county, sampled_date, address, collection_method,
-        latitude, longitude, mosquito_id, number_of_mosquitoes, state
-      ) %>%
-      dplyr::mutate(
-        sampled_date = as.Date(sampled_date, format = "%m/%d/%y")
-      ) %>%
-      dplyr::rename(
-        trapID = "address"
-      )
-  }
+  if (!"sex" %in% names(df)) return(df)
   
-  data.temp <- list_rbind(data.temp)
-  data.temp <- data.temp[!duplicated(data.temp), ] # left join can create some duplicates
+  df$sex <- gsub("^Females.*", "Female", df$sex)
+  df$sex <- gsub("^Female.*", "Female", df$sex)
+  df$sex <- gsub("^F.*", "Female", df$sex)
+  df$sex <- gsub("^f.*", "Female", df$sex)
   
-  # lastly for the coordinates, we need to ensure that there aren't any
-  # coords that far exceed the bounding box of a given county; we'll
-  # use a combo of tigris and sf for this
-  # it is most efficient to do this after collapsing the list and removing dupes
+  df <- df %>%
+    dplyr::filter(
+      sex == "Female"
+    ) %>%
+    dplyr::select(-sex)
+}
+
+#-------------------------------------
+# MAKE OUTPUT STANDARD FOR RBIND LATER
+#-------------------------------------
+
+standardize_output <- function(df) {
+  
+  df %>%
+    dplyr::select(
+      county, sampled_date, address, collection_method,
+      latitude, longitude, mosquito_id,
+      number_of_mosquitoes, state
+    ) %>%
+    dplyr::mutate(
+      sampled_date = as.Date(sampled_date, "%m/%d/%y")
+    ) %>%
+    dplyr::rename(trapID = address)
+}
+
+#--------------------------
+# REMOVE UNREALISTIC COORDS
+#--------------------------
+
+filter_outside_counties <- function(df, state_name) {
   
   county_shapes <- counties(state = state_name, cb = TRUE)
   valid_counties <- county_shapes$NAME
   
-  # loop through each county present in the data
-  for (county_name in unique(data.temp$county)) {
+  for (county_name in unique(df$county)) {
     
-    # get bounding box for this county
     bbox <- st_bbox(
       dplyr::filter(county_shapes, NAME == county_name)
     )
     
-    # identify rows for this county only
-    idx <- data.temp$county == county_name
+    idx <- df$county == county_name
     
     # identify points outside the bbox
     outside_bbox <- idx & (
-      data.temp$longitude < bbox$xmin |
-        data.temp$longitude > bbox$xmax |
-        data.temp$latitude < bbox$ymin |
-        data.temp$latitude > bbox$ymax
+      df$longitude < bbox$xmin |
+        df$longitude > bbox$xmax |
+        df$latitude < bbox$ymin |
+        df$latitude > bbox$ymax
     )
-    
-    # drop only the offending rows
-    data.temp <- data.temp[!outside_bbox, ]
+    df <- df[!outside_bbox, ]
   }
   
-  # final safety valve
-  data.temp <- data.temp %>% filter(county %in% valid_counties)
+  df %>% dplyr::filter(county %in% valid_counties)
+}
+
+#-----------------------------------------------
+# IF ADDRESS HAS LAT/LONG ONCE, ENSURE IT ALWAYS DOES
+#-----------------------------------------------
+
+propagate_coords <- function(df) {
+  df %>%
+    group_by(address) %>%
+    mutate(
+      latitude = coalesce(latitude,
+                          ifelse(is.finite(max(latitude, na.rm = TRUE)),
+                                 max(latitude, na.rm = TRUE), NA_real_)),
+      longitude = coalesce(longitude,
+                           ifelse(is.finite(max(longitude, na.rm = TRUE)),
+                                  max(longitude, na.rm = TRUE), NA_real_))
+    ) %>%
+    ungroup()
+}
+
+#--------
+# COMPILE
+#--------
+
+sweep_fun <- function(path, state_name,
+                      extensions = NULL,
+                      sheets = FALSE,
+                      dirs = dirs_dict) {
   
+  temp.list <- loader_fun(path, extensions, sheets)
   
-  return(data.temp)
+  temp.list <- map(
+    temp.list,
+    function(df) {
+      df %>%
+        dplyr::mutate(state = state_name) %>%
+        standard_genus() %>%
+        parse_coords() %>%
+        geocode_missing_coords(state_name, dirs) %>%
+        propagate_coords() %>%
+        filter_females() %>%
+        standardize_output()
+    }
+  )
   
+  data.temp <- list_rbind(temp.list)
+  
+  filter_outside_counties(data.temp, state_name) %>% 
+    distinct()
 }
 
 # TEST SHEETS
@@ -344,15 +333,22 @@ ca.extensions <- c(
 )
 
 
+#-----------
+# ARIZONA
+#-----------
+
+az.path = here("AZ/2013-2019.csv")
+
+
 
 nueces <- sweep_fun(path = nu.path, state_name = "TX", sheets = TRUE)
 
 # TEST CSV
 
-california <- sweep_fun(path = NULL, state_name = "CA", 
+california <- sweep_fun(path = NULL, state_name = "CA",
                         extensions = ca.extensions)
 
-az.path = here("AZ/2013-2019.csv")
+
 az <- sweep_fun(
   path = az.path,
   state_name = "AZ"
