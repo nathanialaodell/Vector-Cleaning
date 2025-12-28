@@ -17,8 +17,8 @@ The first, 'sweep', is a function that takes a raw, potentially messy .csv, .xls
 | Argument | Description |
 |---------------------|---------------------------------------------------|
 | path | Character. The directory of a single datasheet. |
-| state_name | Character. Abbreviated state (e.g. "TX", "WA") that vector data comes from. |
-| extensions | List of character. If working with multi-year data that is spread across multiple files, a list of path directories. Defaults to NULL. |
+| state_name | Character. Abbreviated state (e.g. "TX", "WA") that vector data comes from. This arg is used to create a 'state' column--useful when binding multiple agencies' data. |
+| extensions | If working with multi-year data that is spread across multiple files, a list of path directories. Defaults to NULL. |
 | sheets | TRUE or FALSE. Indicates whether data is stored within multiple excel sheets. Defaults to FALSE. |
 | dirs | Street direction dictionary (used in the purposes of standardizing addresses using 'postmastr': see pm_dictionary) |
 
@@ -37,7 +37,7 @@ The 'sweep' function can be split into a few sections and accomplishes multiple 
 
 **Thus, this function has the following limitations and assumptions (specifically with respect to the data input format)**.
 
-1)  The input data **must** have the following variables/column names:
+1)  The input data **must** have at least the following variables/column names (all other variables are ignored--for now, anyway):
 
 | Variable | Description |
 |----------------------------|--------------------------------------------|
@@ -49,7 +49,6 @@ The 'sweep' function can be split into a few sections and accomplishes multiple 
 | longitude | Coordinate. Can be of any format initially. |
 | mosquito_id | Species collected on sampled_date |
 | number_of_mosquitoes | Number of a particular species collected on sampled_date |
-| state | State of collection (can be in the format "TX" or "Texas" |
 
 2)  It is assumed that the 'tigris' package has the most up-to-date and correct county boundaries as per its counties() function call. Tigris uses the Census line files to draw these county boundaries.
 3)  Some trap locations/geocoordinates may simply be impossible to decipher/clean using the combination of 'parzer', 'tigris', and 'postmastr' leveraged in this function. This can cause issues in geospatial analysis if not caught.
