@@ -75,5 +75,5 @@ The procedure is identical to the one described above except for the following c
 | longitude | Coordinate. Can be of any format initially. |
 | mosquito_id | Species collected on sampled_date |
 | number_of_mosquitoes | Number of a particular species collected on sampled_date (FEMALES) |
-| disease | The disease being tested for. |
-| result | Result of test (1 if positive, else 0). |
+| **disease** | **The disease being tested for.** |
+| **result** | **Result of test (1 if positive, else 0).** |
