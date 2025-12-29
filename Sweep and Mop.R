@@ -114,7 +114,8 @@ geocode_missing_coords <- function(df, state_name, dirs) {
   
   if (!("city" %in% names(df)) ||
       sum(is.na(df$latitude) | is.na(df$longitude)) == 0) {
-    return(df)
+    return(df) 
+    warning("No city data present in provided datasheet. Missing coordinates will not be geocoded.")
   }
   
   na_df <- df %>%
@@ -223,7 +224,29 @@ standardize_output <- function(df) {
     dplyr::mutate(
       sampled_date = as.Date(sampled_date, "%m/%d/%y")
     ) %>%
-    dplyr::rename(trapID = address)
+    dplyr::rename(trapID = address,
+                  species = mosquito_id,
+                  total = number_of_mosquitoes)
+}
+
+standardize_output_pools <- function(df) {
+  
+  df %>%
+    dplyr::select(
+      county, sampled_date, address, collection_method,
+      latitude, longitude, mosquito_id,
+      number_of_mosquitoes, state, disease, result
+    ) %>%
+    dplyr::mutate(
+      sampled_date = as.Date(sampled_date, "%m/%d/%y"),
+      result = ifelse(
+        result %in% c("Positive", "Confirmed", 1), 1, 0
+      )
+    ) %>%
+    dplyr::rename(trapID = address,
+                  species = mosquito_id,
+                  total = number_of_mosquitoes
+                  )
 }
 
 #--------------------------
@@ -278,14 +301,35 @@ propagate_coords <- function(df) {
 # COMPILE
 #--------
 
-sweep_fun <- function(path, state_name,
+sweep_fun <- function(path = NULL, 
+                      state_name,
                       extensions = NULL,
                       sheets = FALSE,
-                      dirs = dirs_dict) {
+                      dirs = dirs_dict,
+                      type = "abundance") {
+  
+  if (is.null(path) & is.null(extensions)) stop("No file type specifed ('path' and 'extensions' args cannot be simultaneously NULL).")
+  
+  if(missing(state_name)) stop("No state provided! Please specify 'state_name' arg (e.g. 'TX'', 'WA', etc.)")
+  
+  if(missing(type)) warning("'type' arg defaults to 'abundance'; ensure this is appropriate for your purposes!")
+  
+  message("Loading data...")
   
   temp.list <- loader_fun(path, extensions, sheets)
   
-  temp.list <- map(
+  message("Data loaded successfully!")
+  
+  std_fun <- switch( # praise stack overflow!
+    type,
+    abundance = standardize_output,
+    pool = standardize_output_pools,
+    stop("Not a valid datasheet type! Must be either 'abundance' or 'pool'.")
+  )
+  
+  message("Sweeping up. This may take a while...")
+  
+  temp.list <- purrr::map(
     temp.list,
     function(df) {
       df %>%
@@ -295,15 +339,18 @@ sweep_fun <- function(path, state_name,
         geocode_missing_coords(state_name, dirs) %>%
         propagate_coords() %>%
         filter_females() %>%
-        standardize_output()
+        std_fun()
     }
   )
   
+  message("Sweep complete! Binding data...")
+  
   data.temp <- list_rbind(temp.list)
   
-  filter_outside_counties(data.temp, state_name) %>% 
-    distinct()
+  filter_outside_counties(data.temp, state_name) %>%
+    dplyr::distinct()
 }
+
 
 # TEST SHEETS
 # use this for readxl! https://github.com/rstudio/cheatsheets/blob/main/data-import.pdf
@@ -332,26 +379,42 @@ ca.extensions <- c(
   paste(ca.path, "/abundance_", "2021-25.csv", sep = "")
 )
 
+ca.extensions.pool <- c(
+  paste(ca.path, "/pool_", "2003-15.csv", sep = ""),
+  paste(ca.path, "/pool_", "2016-20.csv", sep = ""),
+  paste(ca.path, "/pool_", "2021-25.csv", sep = "")
+)
+
+
+ca <- sweep_fun(state_name = "CA", extensions = ca.extensions)
+ca.pool <- sweep_fun(extensions = ca.extensions.pool, state_name = "CA", type = "pool")
 
 #-----------
 # ARIZONA
 #-----------
+az.path = here("AZ")
 
-az.path = here("AZ/2013-2019.csv")
+az.extensions.pool <- c(
+  paste(az.path, "/MCVC Lab Data Jan 2013 until Dec 2019.csv", sep = ""),
+  paste(az.path, "/2020-2024 MCVC Lab Data.csv", sep = "")
+)
 
+az.extensions <- c(
+  paste(az.path, "/2013-2019.csv", sep = ""),
+  paste(az.path, "/2020-2024.csv", sep = "")
+)
 
+# TEST EXCEL ABUNDANCE
 
 nueces <- sweep_fun(path = nu.path, state_name = "TX", sheets = TRUE)
 
-# TEST CSV
-
-california <- sweep_fun(path = NULL, state_name = "CA",
-                        extensions = ca.extensions)
+# TEST CSV POOLS
 
 
 az <- sweep_fun(
-  path = az.path,
-  state_name = "AZ"
+  path = az.extensions.pool,
+  state_name = "AZ",
+  type = "pool"
 )
 
 # TEST SF
